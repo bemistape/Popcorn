@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Popcorn Grab</title>
+  <title>Side-Scroller Popcorn</title>
   <style>
     body { margin: 0; background: #222; }
     canvas { display: block; margin: 0 auto; }
@@ -11,18 +11,19 @@
 <body>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js"></script>
   <script>
-    // Global variables
-    let player, cursors, popcornGroup, bag, ratGroup;
-    let inventory = 0, bagFill = 0, bagFillThreshold = 10, score = 0;
-    let scoreText, inventoryText, bagText;
+    let player, ground, cursors;
+    let popcornGroup, ratGroup, bag;
+    let score = 0, scoreText;
+    let inventory = 0, inventoryText;
+    let bagFill = 0, bagFillThreshold = 10, bagText;
     
     const config = {
       type: Phaser.AUTO,
       width: 800,
-      height: 600,
+      height: 450,
       physics: {
         default: 'arcade',
-        arcade: { debug: false }
+        arcade: { gravity: { y: 500 }, debug: false }
       },
       scene: { preload, create, update }
     };
@@ -30,154 +31,198 @@
     const game = new Phaser.Game(config);
     
     function preload() {
-      const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+      // We’ll draw a few basic pixel-art shapes via graphics, then generate textures.
+      const g = this.make.graphics({ x: 0, y: 0, add: false });
       
-      // Create player texture – a simple 16x16 drab square
-      graphics.fillStyle(0x888888, 1);
-      graphics.fillRect(0, 0, 16, 16);
-      graphics.generateTexture('player', 16, 16);
-      graphics.clear();
+      // 1) Background tile (16x16) – a faintly grungy wall
+      g.fillStyle(0x444444);
+      g.fillRect(0, 0, 16, 16);
+      // add a couple random "specks" for texture
+      g.fillStyle(0x555555);
+      g.fillRect(4, 4, 2, 2);
+      g.fillRect(10, 10, 1, 1);
+      g.generateTexture('bg-tile', 16, 16);
+      g.clear();
       
-      // Create popcorn texture – a small 8x8 pale yellow circle
-      graphics.fillStyle(0xffe066, 1);
-      graphics.fillCircle(4, 4, 4);
-      graphics.generateTexture('popcorn', 8, 8);
-      graphics.clear();
+      // 2) Floor tile (16x16) – a darker strip with lines
+      g.fillStyle(0x222222);
+      g.fillRect(0, 0, 16, 16);
+      // horizontal lines
+      g.fillStyle(0x2a2a2a);
+      g.fillRect(0, 8, 16, 1);
+      g.generateTexture('floor-tile', 16, 16);
+      g.clear();
       
-      // Create bag texture – a near-black 24x32 rectangle
-      graphics.fillStyle(0x111111, 1);
-      graphics.fillRect(0, 0, 24, 32);
-      graphics.generateTexture('bag', 24, 32);
-      graphics.clear();
+      // 3) Player: 16x24 with a basic body, head, and tiny arms/legs
+      g.fillStyle(0x999999);
+      // body
+      g.fillRect(6, 8, 4, 12);
+      // head
+      g.fillRect(5, 2, 6, 6);
+      // arms
+      g.fillRect(3, 10, 3, 2);
+      g.fillRect(10, 10, 3, 2);
+      // legs
+      g.fillRect(6, 20, 2, 4);
+      g.generateTexture('player', 16, 24);
+      g.clear();
       
-      // Create rat texture – a small brownish 16x8 rectangle
-      graphics.fillStyle(0x664422, 1);
-      graphics.fillRect(0, 0, 16, 8);
-      graphics.generateTexture('rat', 16, 8);
-      graphics.clear();
+      // 4) Popcorn kernel: 8x8, a rough puff shape
+      g.fillStyle(0xffe080);
+      g.fillRect(2, 2, 4, 4);
+      g.fillStyle(0xfff1c0);
+      g.fillRect(3, 3, 2, 2);
+      g.generateTexture('popcorn', 8, 8);
+      g.clear();
+      
+      // 5) Rat: 16x8, small body + tail
+      g.fillStyle(0x6b4f2c); // body
+      g.fillRect(0, 2, 10, 4);
+      g.fillStyle(0x4b2f0c); // tail
+      g.fillRect(10, 3, 6, 2);
+      g.generateTexture('rat', 16, 8);
+      g.clear();
+      
+      // 6) Bag: 16x24, narrower at top, wider at bottom
+      g.fillStyle(0x1a1a1a);
+      // main body
+      g.fillRect(4, 4, 8, 16);
+      // narrower top
+      g.fillRect(5, 2, 6, 2);
+      g.generateTexture('bag', 16, 24);
+      g.clear();
     }
     
     function create() {
-      // Set a drab background color
-      this.cameras.main.setBackgroundColor(0x333333);
+      // Make the world bigger so we can side-scroll
+      const worldWidth = 2400;
+      const worldHeight = 450;
+      this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
       
-      // Create the player in the center
-      player = this.physics.add.sprite(400, 300, 'player');
+      // Tiled background
+      const bg = this.add.tileSprite(0, 0, worldWidth, worldHeight, 'bg-tile');
+      bg.setOrigin(0);
+      
+      // Floor: a static tile sprite along the bottom
+      ground = this.add.tileSprite(0, 400, worldWidth, 50, 'floor-tile');
+      ground.setOrigin(0);
+      this.physics.add.existing(ground, true); // make it a static body
+      
+      // Player
+      player = this.physics.add.sprite(100, 300, 'player');
       player.setCollideWorldBounds(true);
+      this.physics.add.collider(player, ground);
       
-      // Create a group of popcorn kernels scattered randomly
+      // Camera follows the player
+      this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
+      this.cameras.main.startFollow(player, true, 0.05, 0.05);
+      
+      // Create popcorn group
       popcornGroup = this.physics.add.group();
-      for (let i = 0; i < 30; i++) {
-        const x = Phaser.Math.Between(50, 750);
-        const y = Phaser.Math.Between(50, 550);
-        popcornGroup.create(x, y, 'popcorn');
+      // Scatter kernels around the level
+      for (let i = 0; i < 25; i++) {
+        let x = Phaser.Math.Between(50, worldWidth - 50);
+        let y = 350; // On the floor
+        const popcorn = popcornGroup.create(x, y, 'popcorn');
+        // Slight bounce so they don’t overlap
+        popcorn.setBounce(0.2);
       }
-      
-      // Create the bag at the bottom center
-      bag = this.physics.add.staticSprite(400, 580, 'bag');
-      
-      // Create a group for rats
-      ratGroup = this.physics.add.group();
-      
-      // Set up overlaps
+      this.physics.add.collider(popcornGroup, ground);
       this.physics.add.overlap(player, popcornGroup, collectPopcorn, null, this);
+      
+      // Create bag on the far right side
+      bag = this.physics.add.staticSprite(worldWidth - 100, 350, 'bag');
       this.physics.add.overlap(player, bag, depositPopcorn, null, this);
+      
+      // Create rats
+      ratGroup = this.physics.add.group();
+      this.time.addEvent({
+        delay: 3000,
+        callback: () => spawnRat(this),
+        loop: true
+      });
+      this.physics.add.collider(ratGroup, ground);
+      this.physics.add.collider(ratGroup, ratGroup);
       this.physics.add.overlap(ratGroup, popcornGroup, ratEatsPopcorn, null, this);
       
-      // Set up keyboard controls
+      // Keyboard input
       cursors = this.input.keyboard.createCursorKeys();
       
-      // UI texts
+      // UI
       scoreText = this.add.text(10, 10, 'Score: 0', { font: '16px monospace', fill: '#ffffff' });
+      scoreText.setScrollFactor(0);
       inventoryText = this.add.text(10, 30, 'Inventory: 0', { font: '16px monospace', fill: '#ffffff' });
+      inventoryText.setScrollFactor(0);
       bagText = this.add.text(10, 50, 'Bag: 0/10', { font: '16px monospace', fill: '#ffffff' });
-      
-      // Start the rat-spawning cycle
-      spawnRat(this);
+      bagText.setScrollFactor(0);
     }
     
     function update() {
-      // Basic player movement
-      const speed = 150;
-      player.setVelocity(0);
+      // Basic side-scroller movement
+      const speed = 160;
+      player.setVelocityX(0);
+      
       if (cursors.left.isDown) {
         player.setVelocityX(-speed);
       } else if (cursors.right.isDown) {
         player.setVelocityX(speed);
       }
-      if (cursors.up.isDown) {
-        player.setVelocityY(-speed);
-      } else if (cursors.down.isDown) {
-        player.setVelocityY(speed);
+      
+      // Jump
+      if (cursors.up.isDown && player.body.touching.down) {
+        player.setVelocityY(-300);
       }
     }
     
-    // When player touches a popcorn kernel, collect it.
     function collectPopcorn(player, popcorn) {
       popcorn.destroy();
       inventory++;
       inventoryText.setText('Inventory: ' + inventory);
     }
     
-    // When player overlaps the bag, deposit the popcorn.
     function depositPopcorn(player, bag) {
       if (inventory > 0) {
         bagFill += inventory;
         score += inventory;
         inventory = 0;
-        inventoryText.setText('Inventory: ' + inventory);
-        bagText.setText('Bag: ' + bagFill + '/' + bagFillThreshold);
+        inventoryText.setText('Inventory: 0');
         scoreText.setText('Score: ' + score);
+        bagText.setText('Bag: ' + bagFill + '/' + bagFillThreshold);
         
         if (bagFill >= bagFillThreshold) {
-          // Bag is full—simulate tying it for a bonus
+          // Bag is full—tie it off for a bonus
           score += 5;
           scoreText.setText('Score: ' + score);
           bagFill = 0;
-          bagText.setText('Bag: ' + bagFill + '/' + bagFillThreshold);
-          // Simple "tie" animation: quick tint change
+          bagText.setText('Bag: 0/' + bagFillThreshold);
+          // Briefly tint the bag to show it's "tied"
           bag.setTint(0x00ff00);
-          this.time.addEvent({
-            delay: 200,
+          player.scene.time.addEvent({
+            delay: 300,
             callback: () => bag.clearTint()
           });
         }
       }
     }
     
-    // If a rat touches a popcorn kernel, it eats it.
-    function ratEatsPopcorn(rat, popcorn) {
-      popcorn.destroy();
-    }
-    
-    // Spawn a rat from a random edge with a random velocity.
     function spawnRat(scene) {
-      let side = Phaser.Math.Between(1, 4); // 1: left, 2: right, 3: top, 4: bottom
-      let x, y;
-      if (side === 1) { x = 0; y = Phaser.Math.Between(0, config.height); }
-      else if (side === 2) { x = config.width; y = Phaser.Math.Between(0, config.height); }
-      else if (side === 3) { x = Phaser.Math.Between(0, config.width); y = 0; }
-      else { x = Phaser.Math.Between(0, config.width); y = config.height; }
-      
-      const rat = scene.physics.add.sprite(x, y, 'rat');
+      // Spawn near the ground, random X
+      let x = Phaser.Math.Between(50, scene.physics.world.bounds.width - 50);
+      let rat = scene.physics.add.sprite(x, 350, 'rat');
       rat.setCollideWorldBounds(true);
       rat.setBounce(1);
-      rat.setVelocity(Phaser.Math.Between(-100, 100), Phaser.Math.Between(-100, 100));
+      rat.setVelocityX(Phaser.Math.Between(-50, 50));
       ratGroup.add(rat);
       
-      // Remove the rat after 10 seconds
+      // Remove rat after some time
       scene.time.addEvent({
-        delay: 10000,
+        delay: 8000,
         callback: () => { if (rat.active) rat.destroy(); }
       });
-      
-      // Schedule the next rat spawn (between 5-15 seconds)
-      const nextSpawn = Phaser.Math.Between(5000, 15000);
-      scene.time.addEvent({
-        delay: nextSpawn,
-        callback: spawnRat,
-        args: [scene]
-      });
+    }
+    
+    function ratEatsPopcorn(rat, popcorn) {
+      popcorn.destroy();
     }
   </script>
 </body>
